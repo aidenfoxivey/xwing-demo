@@ -81,4 +81,5 @@ XWingSharedSecret combiner(const MSharedSecret &m_ss, const XSharedSecret &x_ss,
 std::tuple<XWingSharedSecret, XWingCipherText> encapsulate(const XWingPublicKey &xwing_pk);
 XWingSharedSecret decapsulate(const XWingCipherText &xwing_ct, const XWingSecretKey &xwing_sk);
 std::tuple<XWingSecretKey, XWingPublicKey> generate_key_pair_derand(const XWingSecretKey &xwing_sk);
+std::tuple<XWingSharedSecret, XWingCipherText> encapsulate_derand(const XWingPublicKey &xwing_pk, std::array<uint8_t, 64>& eseed);
 } // namespace XWing

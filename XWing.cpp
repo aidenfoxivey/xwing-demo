@@ -34,8 +34,14 @@ expand_decapsulation_key(const XWingSecretKey &sk) {
                                                    expanded.data());
   /* Read 32 bytes from offsets 64 to 96 */
   std::copy(expanded.begin() + 64, expanded.end(), x_sk.b.begin());
-  /* When given nullptr, `eval` uses the X25519 base point on the elliptic curve
-   */
+
+  /* https://www.rfc-editor.org/rfc/rfc7748.html */
+  /* Apply X25519 scalar clamping as per RFC 7748 */
+  x_sk.b[0] &= 248;
+  x_sk.b[31] &= 127;
+  x_sk.b[31] |= 64;
+
+  /* When given nullptr, `eval` uses the X25519 base point on the elliptic curve */
   Curve25519::eval(x_pk.b.data(), x_sk.b.data(), nullptr);
 
   return {m_sk, x_sk, m_pk, x_pk};
@@ -108,6 +114,13 @@ encapsulate(const XWingPublicKey &xwing_pk) {
   XWingCipherText xwing_ct;
   std::array<uint8_t, 32> ek_x;
 
+  randombytes(ek_x.data(), 32);
+
+  /* Apply X25519 scalar clamping as per RFC 7748 */
+  ek_x[0] &= 248;
+  ek_x[31] &= 127;
+  ek_x[31] |= 64;
+
   std::copy(xwing_pk.b.begin(), xwing_pk.b.begin() + M_PK_BYTES,
             m_pk.b.begin());
   std::copy(xwing_pk.b.begin() + M_PK_BYTES,
@@ -120,6 +133,54 @@ encapsulate(const XWingPublicKey &xwing_pk) {
 
   PQCLEAN_MLKEM768_CLEAN_crypto_kem_enc(m_ct.b.data(), m_ss.b.data(),
                                         m_pk.b.data());
+
+  xwing_ss = combiner(m_ss, x_ss, x_ct, x_pk);
+
+  /* Concat operation */
+  auto it = std::copy(m_ct.b.begin(), m_ct.b.end(), xwing_ct.b.begin());
+  std::copy(x_ct.b.begin(), x_ct.b.end(), it);
+
+  return {xwing_ss, xwing_ct};
+}
+
+/**
+ * Encapsulates a shared secret using an XWING public key.
+ *
+ * @param xwing_pk The XWING public key to encapsulate against
+ * @return A tuple containing (shared_secret, ciphertext) for the recipient
+ */
+std::tuple<XWingSharedSecret, XWingCipherText>
+encapsulate_derand(const XWingPublicKey &xwing_pk, std::array<uint8_t, 64>& eseed) {
+  MPublicKey m_pk;
+  XPublicKey x_pk;
+  XCipherText x_ct;
+  XSharedSecret x_ss;
+  MSharedSecret m_ss;
+  MCipherText m_ct;
+  XWingSharedSecret xwing_ss;
+  XWingCipherText xwing_ct;
+
+  std::array<uint8_t, 32> ek_X;
+  std::array<uint8_t, 32> ek_M;
+  std::copy(eseed.begin(), eseed.begin() + 32, ek_M.begin());
+  std::copy(eseed.begin() + 32, eseed.end(), ek_X.begin());
+
+  /* Apply X25519 scalar clamping as per RFC 7748 */
+  ek_X[0] &= 248;
+  ek_X[31] &= 127;
+  ek_X[31] |= 64;
+
+  std::copy(xwing_pk.b.begin(), xwing_pk.b.begin() + M_PK_BYTES,
+            m_pk.b.begin());
+  std::copy(xwing_pk.b.begin() + M_PK_BYTES,
+            xwing_pk.b.begin() + M_PK_BYTES + X_PK_BYTES, x_pk.b.begin());
+
+  /* As before, setting the second point to nullptr uses X22519_BASE implicity */
+  Curve25519::eval(x_ct.b.data(), ek_X.data(), nullptr);
+  Curve25519::eval(x_ss.b.data(), ek_X.data(), x_pk.b.data());
+
+  PQCLEAN_MLKEM768_CLEAN_crypto_kem_enc_derand(m_ct.b.data(), m_ss.b.data(),
+                                                m_pk.b.data(), ek_M.data());
 
   xwing_ss = combiner(m_ss, x_ss, x_ct, x_pk);
 
@@ -187,8 +248,6 @@ generate_key_pair_derand(const XWingSecretKey &xwing_sk) {
 
   return {xwing_sk, xwing_pk};
 }
-
-/* Note that we do not provide encapsulate_derand */
 } // namespace XWing
 
 /**
